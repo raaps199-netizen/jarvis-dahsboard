@@ -154,6 +154,21 @@ async function openResearch(initialQuery=''){
   if(!count)overviewHtml+='<p>Belum ada artikel yang cocok dari API yang merespons. Coba kata kunci lebih spesifik atau gunakan tautan mesin pencari.</p>';
   overviewHtml+=searchLinks+'<div class="placeholder"><b>Catatan:</b> ini menggabungkan katalog dan sumber yang bisa diakses browser, bukan seluruh internet. Ringkasan tidak selalu tersedia dan bukan kesimpulan AI; cek sumber asli.</div>';
   sourceHtml+=searchLinks;if(failed)sourceHtml+='<p class="muted">'+failed+' layanan gagal merespons pada pencarian ini; hasil dari layanan lain tetap ditampilkan.</p>';
+  let aiHtml='<section style="margin:14px 0;padding:14px;border:1px solid #67e8ff55;border-radius:13px;background:#061a30"><h3 style="margin:0 0 10px;color:#75e6ff">J.A.R.V.I.S. AI ANALYSIS</h3>';
+  try{
+   const aiResponse=await fetch('/api/research',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})});
+   const aiData=await aiResponse.json();
+   if(!aiResponse.ok)throw new Error(aiData.error||'AI tidak dapat memproses permintaan.');
+   const answerText=String(aiData.answer||'Jawaban kosong.');
+   aiHtml+='<div style="white-space:pre-wrap;line-height:1.75">'+safe(answerText)+'</div>';
+   const aiSources=Array.isArray(aiData.sources)?aiData.sources:[];
+   if(aiSources.length)aiHtml+='<h4 style="color:#a7edff;margin:15px 0 7px">Sumber dari Google Search</h4>'+aiSources.map(src=>'<p style="margin:7px 0"><a target="_blank" rel="noopener" href="'+safe(src.url)+'" style="color:#8ceaff">'+safe(src.title)+' ↗</a></p>').join('');
+   aiHtml+='<p class="muted" style="font-size:11px;margin-bottom:0">Jawaban dibuat AI. Periksa sumber asli untuk informasi penting.</p>';
+  }catch(err){
+   aiHtml+='<p style="line-height:1.6">AI belum tersambung: '+safe(err.message||'backend belum tersedia')+'</p><p class="muted" style="font-size:11px">Dashboard harus dibuka dari deployment Vercel yang memiliki endpoint /api/research dan environment variable GEMINI_API_KEY. GitHub Pages hanya menyajikan file statis.</p>';
+  }
+  aiHtml+='</section>';
+  overviewHtml=aiHtml+overviewHtml;
   overview.innerHTML=overviewHtml;sources.innerHTML=sourceHtml;visuals.innerHTML=imgs.length?'<h3 style="margin:18px 0 9px;color:#a7edff">Visual · Wikimedia Commons</h3><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px">'+imgs.slice(0,8).map(x=>'<a href="'+safe(x.url)+'" target="_blank" rel="noopener" style="color:#ccefff;text-decoration:none;font-size:11px"><img src="'+safe(x.url)+'" alt="'+safe(x.title)+'" loading="lazy" style="width:100%;height:125px;object-fit:cover;border-radius:9px;background:#06142e"><span style="display:block;margin-top:5px">'+safe(x.title.replace('File:',''))+'</span></a>').join('')+'</div>':'<p>Tidak ada visual ditemukan. Coba kata kunci visual yang lebih umum.</p>';
   status.textContent='Selesai: '+count+' hasil teks dari '+articles.filter(g=>g.items.length).length+' katalog dan '+imgs.length+' visual.'+(failed?' '+failed+' layanan gagal.':'');
  }
