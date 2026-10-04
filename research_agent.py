@@ -15,9 +15,16 @@ PORT = int(os.getenv("JARVIS_RESEARCH_PORT", "8765"))
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434/api/generate")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
 app = FastAPI(title="JARVIS Local Research Agent", version="1.0.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=False,
+app.add_middleware(CORSMiddleware, allow_origins=["https://raaps199-netizen.github.io", "http://127.0.0.1:5500", "http://localhost:5500"], allow_credentials=False,
                    allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["*"])
-pool = ThreadPoolExecutor(max_workers=2)
+pool = ThreadPoolExecutor(max_workers=1)
+
+@app.middleware("http")
+async def allow_private_network_header(request, call_next):
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Private-Network"] = "true"
+    return response
+
 jobs: dict[str, dict[str, Any]] = {}
 jobs_lock = threading.Lock()
 
