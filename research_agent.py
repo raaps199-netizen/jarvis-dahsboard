@@ -49,17 +49,34 @@ def fallback_summary(query: str, pages: list[dict[str, Any]]) -> str:
     return (f"Riset awal: {query}\n\n" + "\n\n".join(blocks) +
             "\n\nCatatan: model AI lokal belum tersedia. Ini kompilasi isi halaman, bukan sintesis AI. Jalankan Ollama untuk laporan analitis.")
 
+def choose_ollama_model() -> str | None:
+    try:
+        response = requests.get("http://127.0.0.1:11434/api/tags", timeout=1.5)
+        if not response.ok:
+            return None
+        installed = [str(item.get("name", "")) for item in response.json().get("models", []) if item.get("name")]
+        if OLLAMA_MODEL in installed:
+            return OLLAMA_MODEL
+        if installed:
+            return installed[0]
+    except (requests.RequestException, ValueError, TypeError):
+        pass
+    return None
+
 def ask_ollama(query: str, pages: list[dict[str, Any]]) -> str | None:
     evidence = [f"JUDUL: {x.get('title', '')}\nISI: {compact_text(x.get('text', ''), 2600)}"
                 for x in pages[:8] if compact_text(x.get("text", ""), 2600)]
     if not evidence:
+        return None
+    model = choose_ollama_model()
+    if not model:
         return None
     prompt = ("Buat laporan riset bahasa Indonesia berdasarkan bahan di bawah. Jangan mengarang angka, tanggal, atau fakta. "
               "Jika bukti kurang, sebutkan keterbatasannya. Struktur: Ringkasan Eksekutif, Temuan Utama, Analisis, "
               "Implikasi, Kesimpulan. Jangan menyebut mesin pencari atau layanan AI yang dipakai.\nTopik: "
               + query + "\n\nBAHAN:\n" + "\n\n".join(evidence))
     try:
-        response = requests.post(OLLAMA_URL, json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False}, timeout=45)
+        response = requests.post(OLLAMA_URL, json={"model": model, "prompt": prompt, "stream": False}, timeout=45)
         if response.ok:
             return str(response.json().get("response", "")).strip() or None
     except (requests.RequestException, ValueError, TypeError):
