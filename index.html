@@ -204,7 +204,107 @@ async function openResearch(initialQuery=''){
  if(initialQuery){form.style.display='none';const hint=w.querySelector('.muted[style]');if(hint)hint.textContent='Jendela hasil terpisah. Geser header, ubah ukuran, atau buka riset lain agar jendelanya menumpuk.';input.value=initialQuery;research(initialQuery)}
 }
 function openWebSearch(initialQuery=''){const w=document.createElement('section');w.className='win webSearchWin';w.style.zIndex=++zTop;w.innerHTML='<div class="winBar"><span class="winTitle">J.A.R.V.I.S. · WEB SEARCH</span><div class="winTools"><button class="windowSizeBtn" data-size="down" aria-label="Perkecil jendela" title="Perkecil">−</button><button class="windowSizeBtn" data-size="up" aria-label="Perbesar jendela" title="Perbesar">+</button><button class="windowClose" aria-label="Tutup">×</button></div></div><div class="winBody"><form class="webSearchForm"><input type="search" placeholder="Cari di web..." aria-label="Cari di web" value="'+esc(initialQuery)+'"/><button type="submit">Cari</button></form><div class="webSearchFallback"><span class="muted" data-search-status>Masukkan pencarian. Jika situs menolak tampilan tertanam, buka hasil di tab baru.</span><a href="https://www.google.com/" target="_blank" rel="noopener" data-open-tab>Google di tab baru ↗</a></div><iframe class="webSearchFrame" title="Hasil pencarian web" referrerpolicy="no-referrer" src="about:blank"></iframe></div>';$('windows').appendChild(w);w.addEventListener('pointerdown',()=>w.style.zIndex=++zTop);w.querySelector('.windowClose').onclick=()=>w.remove();const bar=w.querySelector('.winBar');let d=null;bar.addEventListener('pointerdown',e=>{if(e.target.closest('button'))return;const r=w.getBoundingClientRect();d={x:e.clientX,y:e.clientY,l:r.left,t:r.top};w.style.transform='none';w.style.left=r.left+'px';w.style.top=r.top+'px';bar.setPointerCapture(e.pointerId)});bar.addEventListener('pointermove',e=>{if(!d)return;w.style.left=Math.max(0,Math.min(innerWidth-80,d.l+e.clientX-d.x))+'px';w.style.top=Math.max(0,Math.min(innerHeight-60,d.t+e.clientY-d.y))+'px'});bar.addEventListener('pointerup',()=>d=null);bar.addEventListener('pointercancel',()=>d=null);const form=w.querySelector('.webSearchForm'),input=form.querySelector('input'),frame=w.querySelector('.webSearchFrame'),status=w.querySelector('[data-search-status]'),openTab=w.querySelector('[data-open-tab]');function search(q){q=q.trim();if(!q)return;const url='https://www.google.com/search?igu=1&q='+encodeURIComponent(q);frame.src=url;openTab.href='https://www.google.com/search?q='+encodeURIComponent(q);status.textContent='Mencari: '+q+' · Jika hasil tidak muncul di panel, gunakan tautan tab baru.';}form.onsubmit=e=>{e.preventDefault();search(input.value)};if(initialQuery)search(initialQuery);w.querySelector('.winBody').style.height='calc(100% - 43px)';}
-function command(raw){const c=raw.trim();if(!c)return;$('menuPanel').classList.remove('open');state('processing');const l=c.toLowerCase();setTimeout(()=>{if(l.includes('cuaca')||l.includes('weather')){showWeather();speak('Mengambil data cuaca terbaru untuk lokasi Sir.')}else if(l.includes('jadwal')||l.includes('pelajaran')||l.includes('piket')){openSchedule();}else if(l.includes('riset')||l.includes('research')||l.startsWith('apa itu ')||l.startsWith('jelaskan ')){openResearch(c.replace(/^(riset|research|cari tahu|apa itu|jelaskan)\s*/i,''));}else if(l.includes('cari web')||l.includes('search web')||l.startsWith('cari ')){openWebSearch(l.replace(/^(cari web|search web|cari)\s*/,'').trim());}else if(l.includes('catatan')){win('QUICK NOTES','<textarea placeholder="Tulis catatan..." aria-label="Catatan" style="width:100%;min-height:110px;resize:vertical;color:#e9f8ff;background:#000819a6;border:1px solid #67e8ff38;border-radius:9px;padding:10px;font:inherit"></textarea><div class="muted">Catatan belum tersimpan permanen.</div>');speak('Panel catatan dibuka.')}else if(l.includes('bantuan')||l.includes('help')){win('HELP · COMMANDS','<div>Contoh perintah:</div><div class="placeholder">• Cuaca hari ini<br>• Jadwal pelajaran hari ini<br>• Buka catatan</div><div class="muted">Kontrol komputer akan dihubungkan ke agent Python di laptop.</div>');speak('Saya dapat membuka panel cuaca, jadwal, dan catatan pada prototipe ini.')}else{win('COMMAND RECEIVED','<div class="muted">PERINTAH DITERIMA</div><p>'+esc(c)+'</p><div class="placeholder">Perintah ini belum terhubung ke agent Python.</div>');speak('Perintah diterima. Aksi ini belum terhubung ke agent komputer.')}state('standby')},450)}
+
+let arduinoPort=null, arduinoWriter=null, arduinoConnected=false;
+
+async function connectArduino(){
+  if(!("serial" in navigator)){
+    toast("Web Serial tidak didukung. Gunakan Chrome/Edge.");
+    return false;
+  }
+  try{
+    if(arduinoPort && arduinoPort.readable){
+      toast("Arduino sudah terhubung.");
+      return true;
+    }
+    arduinoPort=await navigator.serial.requestPort();
+    await arduinoPort.open({baudRate:9600});
+    arduinoWriter=arduinoPort.writable.getWriter();
+    arduinoConnected=true;
+    updateArduinoUI();
+    toast("Arduino terhubung.");
+    return true;
+  }catch(e){
+    console.error("Arduino connection failed:",e);
+    arduinoConnected=false;
+    updateArduinoUI();
+    toast("Koneksi Arduino dibatalkan/gagal.");
+    return false;
+  }
+}
+
+async function disconnectArduino(){
+  try{
+    if(arduinoWriter){arduinoWriter.releaseLock();arduinoWriter=null;}
+    if(arduinoPort){await arduinoPort.close();arduinoPort=null;}
+  }catch(e){console.error("Arduino disconnect failed:",e);}
+  arduinoConnected=false;
+  updateArduinoUI();
+  toast("Arduino terputus.");
+}
+
+async function sendArduinoCommand(command){
+  if(!arduinoWriter){
+    const ok=await connectArduino();
+    if(!ok)return false;
+  }
+  try{
+    const data=new TextEncoder().encode(command+"\\n");
+    await arduinoWriter.write(data);
+    console.log("JARVIS → Arduino:",command);
+    return true;
+  }catch(e){
+    console.error("Arduino command failed:",e);
+    arduinoConnected=false;
+    updateArduinoUI();
+    toast("Koneksi Arduino terputus.");
+    return false;
+  }
+}
+
+function updateArduinoUI(){
+  const b=document.getElementById("arduinoConnectBtn");
+  const s=document.getElementById("arduinoStatus");
+  if(b)b.textContent=arduinoConnected?"⏏ DISCONNECT":"🔌 CONNECT ARDUINO";
+  if(s){
+    s.textContent=arduinoConnected?"ARDUINO · CONNECTED":"ARDUINO · OFFLINE";
+    s.style.color=arduinoConnected?"#59f6ce":"#8caac9";
+  }
+}
+
+function createArduinoPanel(){
+  const p=document.createElement("section");
+  p.className="win";
+  p.id="arduinoPanel";
+  p.style.zIndex=++zTop;
+  p.style.width="min(330px,calc(100vw - 30px))";
+  p.style.left="24px";
+  p.style.top="24px";
+  p.style.transform="none";
+  p.innerHTML='<div class="winBar"><span class="winTitle">J.A.R.V.I.S. · ARDUINO</span><div class="winTools"><button class="windowClose" aria-label="Tutup">×</button></div></div><div class="winBody"><div id="arduinoStatus" style="font-size:10px;letter-spacing:.15em;color:#8caac9;margin-bottom:12px">ARDUINO · OFFLINE</div><button id="arduinoConnectBtn" class="action" style="width:100%;height:40px">🔌 CONNECT ARDUINO</button><div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:9px"><button id="arduinoUpBtn" class="chip">⬆ UP</button><button id="arduinoDownBtn" class="chip">⬇ DOWN</button></div><button id="arduinoPressBtn" class="action" style="width:100%;height:40px;margin-top:9px">⚙ PRESS SWITCH</button><p class="muted" style="margin:12px 0 0">Nano · 9600 baud · Servo D9</p></div>';
+  $("windows").appendChild(p);
+  p.addEventListener("pointerdown",()=>p.style.zIndex=++zTop);
+  p.querySelector(".windowClose").onclick=()=>p.remove();
+  p.querySelector("#arduinoConnectBtn").onclick=()=>arduinoConnected?disconnectArduino():connectArduino();
+  p.querySelector("#arduinoUpBtn").onclick=()=>sendArduinoCommand("UP");
+  p.querySelector("#arduinoDownBtn").onclick=()=>sendArduinoCommand("DOWN");
+  p.querySelector("#arduinoPressBtn").onclick=()=>sendArduinoCommand("PRESS");
+  const bar=p.querySelector(".winBar"); let d=null;
+  bar.addEventListener("pointerdown",e=>{if(e.target.closest("button"))return;const r=p.getBoundingClientRect();d={x:e.clientX,y:e.clientY,l:r.left,t:r.top};bar.setPointerCapture(e.pointerId)});
+  bar.addEventListener("pointermove",e=>{if(!d)return;p.style.left=Math.max(0,Math.min(innerWidth-90,d.l+e.clientX-d.x))+"px";p.style.top=Math.max(0,Math.min(innerHeight-55,d.t+e.clientY-d.y))+"px"});
+  const stop=()=>d=null;bar.addEventListener("pointerup",stop);bar.addEventListener("pointercancel",stop);
+  updateArduinoUI();
+  return p;
+}
+
+function command(raw){const c=raw.trim();if(!c)return;$('menuPanel').classList.remove('open');state('processing');const l=c.toLowerCase();setTimeout(()=>{if(l.includes('arduino')||l.includes('saklar')||l.includes('lampu')){
+  if(l.includes('hubung')||l.includes('connect')||l.includes('sambung')){createArduinoPanel();connectArduino();speak('Membuka koneksi Arduino.');}
+  else if(l.includes('lepas')||l.includes('disconnect')){disconnectArduino();}
+  else if(l.includes('tekan')||l.includes('pencet')||l.includes('press')){sendArduinoCommand('PRESS');speak('Menekan saklar.');}
+  else if(l.includes('naik')||l.includes('up')){sendArduinoCommand('UP');}
+  else if(l.includes('turun')||l.includes('down')){sendArduinoCommand('DOWN');}
+  else {createArduinoPanel();speak('Panel Arduino dibuka.');}
+}else if(l.includes('cuaca')||l.includes('weather')){showWeather();speak('Mengambil data cuaca terbaru untuk lokasi Sir.')}else if(l.includes('jadwal')||l.includes('pelajaran')||l.includes('piket')){openSchedule();}else if(l.includes('riset')||l.includes('research')||l.startsWith('apa itu ')||l.startsWith('jelaskan ')){openResearch(c.replace(/^(riset|research|cari tahu|apa itu|jelaskan)\s*/i,''));}else if(l.includes('cari web')||l.includes('search web')||l.startsWith('cari ')){openWebSearch(l.replace(/^(cari web|search web|cari)\s*/,'').trim());}else if(l.includes('catatan')){win('QUICK NOTES','<textarea placeholder="Tulis catatan..." aria-label="Catatan" style="width:100%;min-height:110px;resize:vertical;color:#e9f8ff;background:#000819a6;border:1px solid #67e8ff38;border-radius:9px;padding:10px;font:inherit"></textarea><div class="muted">Catatan belum tersimpan permanen.</div>');speak('Panel catatan dibuka.')}else if(l.includes('bantuan')||l.includes('help')){win('HELP · COMMANDS','<div>Contoh perintah:</div><div class="placeholder">• Cuaca hari ini<br>• Jadwal pelajaran hari ini<br>• Buka catatan</div><div class="muted">Kontrol komputer akan dihubungkan ke agent Python di laptop.</div>');speak('Saya dapat membuka panel cuaca, jadwal, dan catatan pada prototipe ini.')}else{win('COMMAND RECEIVED','<div class="muted">PERINTAH DITERIMA</div><p>'+esc(c)+'</p><div class="placeholder">Perintah ini belum terhubung ke agent Python.</div>');speak('Perintah diterima. Aksi ini belum terhubung ke agent komputer.')}state('standby')},450)}
 const commandMenu=document.createElement('section');commandMenu.className='commandMenu';commandMenu.id='commandMenu';commandMenu.innerHTML='<div class="commandMenuHead"><span id="commandMenuTitle">J.A.R.V.I.S. · MENU</span><button class="commandMenuClose" id="commandMenuClose" aria-label="Tutup menu">×</button></div><div class="commandMenuIntro" id="commandMenuIntro">Apa yang bisa saya bantu?</div><p class="commandMenuSub" id="commandMenuSub">Akses cepat ke fitur utama.</p><div class="commandMenuGrid" id="commandMenuGrid"></div><div class="commandMenuHint"><kbd>ESC</kbd> untuk menutup <span>·</span> Ketuk area kosong dua kali untuk membuka</div>';document.body.appendChild(commandMenu);
 function showMainMenu(){commandMenu.classList.add('open');document.body.classList.add('menuOpen');$('commandMenuTitle').textContent='J.A.R.V.I.S. · MENU';$('commandMenuIntro').textContent='Apa yang bisa saya bantu?';$('commandMenuSub').textContent='Akses cepat ke fitur utama.';$('commandMenuGrid').innerHTML='<button class="commandMenuItem" data-action="weather"><span>☼</span>Cuaca</button><button class="commandMenuItem" data-action="search"><span>⌕</span>Cari web</button><button class="commandMenuItem" data-action="research"><span>⌘</span>Research Mode</button><button class="commandMenuItem" data-action="schedule"><span>▦</span>Jadwal sekolah</button><button class="commandMenuItem" data-action="notes"><span>✎</span>Catatan</button><button class="commandMenuItem" data-action="commands"><span>⌘</span>Perintah lain</button><button class="commandMenuItem" data-action="fullscreen"><span>⛶</span>Layar penuh</button><button class="commandMenuItem" data-action="mic"><span>◉</span>Mikrofon</button>';commandMenu.querySelectorAll('[data-action]').forEach(b=>b.onclick=()=>{const action=b.dataset.action;hideMainMenu();if(action==='weather')command('cuaca hari ini');else if(action==='search')openWebSearch();else if(action==='research')openResearch();else if(action==='schedule')openSchedule();else if(action==='notes')command('buka catatan');else if(action==='fullscreen')enterFullscreen();else if(action==='mic')setMic(!micOn);else if(action==='commands')showCommandSubmenu();});}
 function showCommandSubmenu(){commandMenu.classList.add('open');document.body.classList.add('menuOpen');$('commandMenuTitle').textContent='J.A.R.V.I.S. · COMMANDS';$('commandMenuIntro').textContent='Perintah lainnya';$('commandMenuSub').textContent='Pilih fungsi yang ingin dijalankan.';$('commandMenuGrid').innerHTML='<button class="commandMenuItem" data-cmd="bantuan"><span>?</span>Bantuan</button><button class="commandMenuItem" data-cmd="jadwal piket"><span>✓</span>Jadwal piket</button><button class="commandMenuItem" data-cmd="jadwal pelajaran"><span>▤</span>Jadwal pelajaran</button><button class="commandMenuItem" data-cmd="cuaca hari ini"><span>☁</span>Cuaca hari ini</button><button class="commandMenuItem" data-back="1"><span>←</span>Kembali</button>';commandMenu.querySelectorAll('[data-cmd]').forEach(b=>b.onclick=()=>{hideMainMenu();command(b.dataset.cmd)});commandMenu.querySelector('[data-back]').onclick=showMainMenu;}
@@ -212,7 +312,7 @@ function hideMainMenu(){commandMenu.classList.remove('open');document.body.class
 $('commandMenuClose').onclick=hideMainMenu;
 let lastTap=0;document.addEventListener('pointerup',e=>{if(e.target.closest('button,input,textarea,a,.win,.menuPanel,.commandMenu'))return;const now=Date.now();if(now-lastTap<380){if(commandMenu.classList.contains('open'))hideMainMenu();else showMainMenu();lastTap=0;}else lastTap=now;});
 document.addEventListener('dblclick',e=>{if(e.target.closest('button,input,textarea,a,.win,.menuPanel,.commandMenu'))return;if(commandMenu.classList.contains('open'))hideMainMenu();else showMainMenu();});
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){hideMainMenu();$('menuPanel').classList.remove('open')}});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){hideMainMenu();$('menuPanel').classList.remove('open')}});\n// Panel Arduino dapat dibuka dari console browser dengan openArduinoPanel(), atau lewat perintah JARVIS.\nfunction openArduinoPanel(){return createArduinoPanel();}
 
 $('menuClose').onclick=()=>$('menuPanel').classList.remove('open');$('commandForm').onsubmit=e=>{e.preventDefault();command($('commandInput').value);$('commandInput').value=''};document.querySelectorAll('[data-command]').forEach(b=>b.onclick=()=>command(b.dataset.command));
 function setMic(on){micOn=on;$('micBtn').classList.toggle('on',on);$('micLabel').textContent=on?'MIKROFON AKTIF':'MIKROFON NONAKTIF';$('micHint').textContent=on?'Tekan lagi untuk mematikan':'Tekan untuk mengaktifkan';$('micBtn').setAttribute('aria-label',on?'Matikan mikrofon':'Aktifkan mikrofon');if(!on){if(recognition)try{recognition.stop()}catch(e){}recognition=null;state('standby');toast('Mikrofon dinonaktifkan.');return}const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){toast('Pengenalan suara tidak didukung browser ini. Gunakan menu manual.');return}recognition=new SR();recognition.lang='id-ID';recognition.continuous=true;recognition.interimResults=false;recognition.onstart=()=>{if(micOn)state('listening')};recognition.onresult=e=>command(e.results[e.results.length-1][0].transcript);recognition.onerror=e=>{if(e.error!=='no-speech'&&micOn)toast('Suara: '+e.error+'. Coba menu manual.')};recognition.onend=()=>{if(micOn&&recognition)try{recognition.start()}catch(e){}else state('standby')};try{recognition.start();toast('Mikrofon aktif. Izinkan akses mikrofon bila diminta.')}catch(e){toast('Tidak dapat memulai mikrofon. Periksa izin browser.')}}
