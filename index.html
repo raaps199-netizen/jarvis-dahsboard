@@ -245,8 +245,8 @@ async function disconnectArduino(){
 
 async function sendArduinoCommand(command){
   if(!arduinoWriter){
-    const ok=await connectArduino();
-    if(!ok)return false;
+    toast("Hubungkan Arduino dulu lewat panel Arduino.");
+    return false;
   }
   try{
     const data=new TextEncoder().encode(command+"\\n");
@@ -273,6 +273,8 @@ function updateArduinoUI(){
 }
 
 function createArduinoPanel(){
+  const existing=document.getElementById("arduinoPanel");
+  if(existing){existing.style.zIndex=++zTop;return existing;}
   const p=document.createElement("section");
   p.className="win";
   p.id="arduinoPanel";
