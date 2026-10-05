@@ -317,7 +317,7 @@ function createArduinoPanel(){
   const p=document.createElement("section");
   p.className="win";
   p.id="arduinoPanel";
-  p.style.zIndex=++zTop;
+  p.style.zIndex=100; p.style.pointerEvents="auto";
   p.style.width="min(330px,calc(100vw - 30px))";
   p.style.left="24px";
   p.style.top="24px";
@@ -327,9 +327,9 @@ function createArduinoPanel(){
   p.addEventListener("pointerdown",()=>p.style.zIndex=++zTop);
   p.querySelector(".windowClose").onclick=()=>p.remove();
   p.querySelector("#arduinoConnectBtn").onclick=()=>arduinoConnected?disconnectArduino():connectArduino();
-  p.querySelector("#arduinoUpBtn").onclick=()=>sendArduinoCommand("UP");
-  p.querySelector("#arduinoDownBtn").onclick=()=>sendArduinoCommand("DOWN");
-  p.querySelector("#arduinoPressBtn").onclick=()=>sendArduinoCommand("PRESS");
+  p.querySelector("#arduinoUpBtn").onclick=e=>{e.stopPropagation();sendArduinoCommand("UP");};
+  p.querySelector("#arduinoDownBtn").onclick=e=>{e.stopPropagation();sendArduinoCommand("DOWN");};
+  p.querySelector("#arduinoPressBtn").onclick=e=>{e.stopPropagation();sendArduinoCommand("PRESS");};
   const bar=p.querySelector(".winBar"); let d=null;
   bar.addEventListener("pointerdown",e=>{if(e.target.closest("button"))return;const r=p.getBoundingClientRect();d={x:e.clientX,y:e.clientY,l:r.left,t:r.top};bar.setPointerCapture(e.pointerId)});
   bar.addEventListener("pointermove",e=>{if(!d)return;p.style.left=Math.max(0,Math.min(innerWidth-90,d.l+e.clientX-d.x))+"px";p.style.top=Math.max(0,Math.min(innerHeight-55,d.t+e.clientY-d.y))+"px"});
