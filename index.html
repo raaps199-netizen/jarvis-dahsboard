@@ -205,7 +205,38 @@ async function openResearch(initialQuery=''){
 }
 function openWebSearch(initialQuery=''){const w=document.createElement('section');w.className='win webSearchWin';w.style.zIndex=++zTop;w.innerHTML='<div class="winBar"><span class="winTitle">J.A.R.V.I.S. · WEB SEARCH</span><div class="winTools"><button class="windowSizeBtn" data-size="down" aria-label="Perkecil jendela" title="Perkecil">−</button><button class="windowSizeBtn" data-size="up" aria-label="Perbesar jendela" title="Perbesar">+</button><button class="windowClose" aria-label="Tutup">×</button></div></div><div class="winBody"><form class="webSearchForm"><input type="search" placeholder="Cari di web..." aria-label="Cari di web" value="'+esc(initialQuery)+'"/><button type="submit">Cari</button></form><div class="webSearchFallback"><span class="muted" data-search-status>Masukkan pencarian. Jika situs menolak tampilan tertanam, buka hasil di tab baru.</span><a href="https://www.google.com/" target="_blank" rel="noopener" data-open-tab>Google di tab baru ↗</a></div><iframe class="webSearchFrame" title="Hasil pencarian web" referrerpolicy="no-referrer" src="about:blank"></iframe></div>';$('windows').appendChild(w);w.addEventListener('pointerdown',()=>w.style.zIndex=++zTop);w.querySelector('.windowClose').onclick=()=>w.remove();const bar=w.querySelector('.winBar');let d=null;bar.addEventListener('pointerdown',e=>{if(e.target.closest('button'))return;const r=w.getBoundingClientRect();d={x:e.clientX,y:e.clientY,l:r.left,t:r.top};w.style.transform='none';w.style.left=r.left+'px';w.style.top=r.top+'px';bar.setPointerCapture(e.pointerId)});bar.addEventListener('pointermove',e=>{if(!d)return;w.style.left=Math.max(0,Math.min(innerWidth-80,d.l+e.clientX-d.x))+'px';w.style.top=Math.max(0,Math.min(innerHeight-60,d.t+e.clientY-d.y))+'px'});bar.addEventListener('pointerup',()=>d=null);bar.addEventListener('pointercancel',()=>d=null);const form=w.querySelector('.webSearchForm'),input=form.querySelector('input'),frame=w.querySelector('.webSearchFrame'),status=w.querySelector('[data-search-status]'),openTab=w.querySelector('[data-open-tab]');function search(q){q=q.trim();if(!q)return;const url='https://www.google.com/search?igu=1&q='+encodeURIComponent(q);frame.src=url;openTab.href='https://www.google.com/search?q='+encodeURIComponent(q);status.textContent='Mencari: '+q+' · Jika hasil tidak muncul di panel, gunakan tautan tab baru.';}form.onsubmit=e=>{e.preventDefault();search(input.value)};if(initialQuery)search(initialQuery);w.querySelector('.winBody').style.height='calc(100% - 43px)';}
 
-let arduinoPort=null, arduinoWriter=null, arduinoConnected=false;
+let arduinoPort=null, arduinoWriter=null, arduinoReader=null, arduinoConnected=false;
+
+async function readArduinoLoop(){
+  if(!arduinoPort || !arduinoPort.readable) return;
+  const reader=arduinoPort.readable.getReader();
+  arduinoReader=reader;
+  const decoder=new TextDecoder();
+  let buffer="";
+  try{
+    while(arduinoPort && arduinoPort.readable){
+      const {value,done}=await reader.read();
+      if(done)break;
+      if(value){
+        buffer+=decoder.decode(value,{stream:true});
+        const lines=buffer.split(/\\r?\\n/);
+        buffer=lines.pop()||"";
+        lines.map(x=>x.trim()).filter(Boolean).forEach(line=>{
+          console.log("Arduino → JARVIS:",line);
+          if(line==="JARVIS_READY")toast("Arduino siap.");
+          else if(line==="SERVO_UP")toast("Servo: UP");
+          else if(line==="SERVO_DOWN")toast("Servo: DOWN");
+          else if(line==="PRESS_DONE")toast("Saklar ditekan.");
+        });
+      }
+    }
+  }catch(e){
+    if(arduinoConnected)console.warn("Arduino reader stopped:",e);
+  }finally{
+    try{reader.releaseLock()}catch(e){}
+    if(arduinoReader===reader)arduinoReader=null;
+  }
+}
 
 async function connectArduino(){
   if(!("serial" in navigator)){
@@ -219,13 +250,19 @@ async function connectArduino(){
     }
     arduinoPort=await navigator.serial.requestPort();
     await arduinoPort.open({baudRate:9600});
-    arduinoWriter=arduinoPort.writable.getWriter();
-    arduinoConnected=true;
+    await new Promise(resolve=>setTimeout(resolve,1200));
+    arduinoWriter=arduinoPort.writable?.getWriter()||null;
+    arduinoConnected=!!arduinoWriter;
+    if(!arduinoConnected)throw new Error("Port writable tidak tersedia");
     updateArduinoUI();
+    readArduinoLoop();
     toast("Arduino terhubung.");
     return true;
   }catch(e){
     console.error("Arduino connection failed:",e);
+    try{if(arduinoWriter){arduinoWriter.releaseLock();arduinoWriter=null;}}catch(_){}
+    try{if(arduinoPort){await arduinoPort.close();}}catch(_){}
+    arduinoPort=null;
     arduinoConnected=false;
     updateArduinoUI();
     toast("Koneksi Arduino dibatalkan/gagal.");
@@ -235,9 +272,11 @@ async function connectArduino(){
 
 async function disconnectArduino(){
   try{
+    if(arduinoReader){try{await arduinoReader.cancel()}catch(e){}}
     if(arduinoWriter){arduinoWriter.releaseLock();arduinoWriter=null;}
     if(arduinoPort){await arduinoPort.close();arduinoPort=null;}
   }catch(e){console.error("Arduino disconnect failed:",e);}
+  arduinoReader=null;
   arduinoConnected=false;
   updateArduinoUI();
   toast("Arduino terputus.");
